@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#5a1a0b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mesa">
+<title>Mesa</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;color:#000;font:17px/1.4 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  background:radial-gradient(90% 60% at 0% 0%,#ea580c,transparent 62%),radial-gradient(80% 55% at 100% 20%,#fbbf24,transparent 60%),
+  radial-gradient(90% 60% at 10% 100%,#b91c1c,transparent 60%),radial-gradient(60% 45% at 100% 95%,#fde68a,transparent 55%),#5a1a0b;-webkit-font-smoothing:antialiased}
+form{width:min(360px,88vw);text-align:center;padding:30px 24px 24px;border-radius:30px;background:rgba(255,255,255,.62);
+  -webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);box-shadow:0 20px 50px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.8)}
+img{width:76px;height:76px;border-radius:18px;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+h1{font-size:32px;letter-spacing:-.03em;margin:14px 0 2px}
+p{color:rgba(60,60,67,.65);margin:0 0 22px;font-size:15px}
+input[type=password]{width:100%;font-size:17px;padding:14px 16px;border:0;border-radius:14px;background:rgba(118,118,128,.14);outline:none}
+button{margin-top:12px;width:100%;font:600 17px -apple-system,sans-serif;padding:14px;border:0;border-radius:99px;color:#fff;
+  background:linear-gradient(180deg,#ea7a52,#e0532a);box-shadow:0 8px 22px rgba(224,83,42,.38)}
+.err{color:#c2410c;min-height:22px;margin-top:10px;font-size:14px}
+label{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:14px;font-size:14px;color:rgba(60,60,67,.65)}
+</style>
+</head>
+<body>
+<form id="f" hidden>
+  <img src="apple-touch-icon.png" alt="">
+  <h1>Mesa</h1>
+  <p>Your restaurants</p>
+  <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus>
+  <button type="submit" id="go">Open</button>
+  <label><input type="checkbox" id="keep" checked> Remember on this phone</label>
+  <div class="err" id="err"></div>
+</form>
+<script>
+const ITERATIONS = 310000, STORE = "mesa-key";
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function payload() {
+  const r = await fetch("app.bin", {cache: "no-cache"});
+  if (!r.ok) throw new Error("download");
+  return new Uint8Array(await r.arrayBuffer());
+}
+async function keyFromPassword(pw, salt) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"]);
+  return crypto.subtle.deriveBits({name: "PBKDF2", hash: "SHA-256", salt, iterations: ITERATIONS}, base, 256);
+}
+async function decrypt(raw, data) {
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+  return new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: data.slice(16, 28)}, key, data.slice(28)));
+}
+function show(html) { document.open(); document.write(html); document.close(); }
+async function start() {
+  const saved = localStorage.getItem(STORE);
+  if (saved) {
+    try { show(await decrypt(unb64(saved), await payload())); return; }
+    catch (e) { if (e.message !== "download") localStorage.removeItem(STORE); }
+  }
+  document.getElementById("f").hidden = false;
+}
+document.getElementById("f").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const err = document.getElementById("err"), go = document.getElementById("go");
+  err.textContent = ""; go.disabled = true; go.textContent = "Opening…";
+  try {
+    const data = await payload();
+    const raw = await keyFromPassword(document.getElementById("pw").value, data.slice(0, 16));
+    const html = await decrypt(raw, data);
+    if (document.getElementById("keep").checked) localStorage.setItem(STORE, b64(raw));
+    show(html);
+  } catch (e) {
+    err.textContent = e.message === "download" ? "Couldn't load Mesa. Check your connection." : "Wrong password.";
+    go.disabled = false; go.textContent = "Open";
+  }
+});
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+start();
+</script>
+</body>
+</html>
